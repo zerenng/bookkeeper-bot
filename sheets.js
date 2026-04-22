@@ -10,24 +10,72 @@ async function getSheets() {
 }
 
 function getCurrentMonthTab() {
-  return new Date().toLocaleString('default',{month:'long',year:'numeric'});
+  return new Date().toLocaleString('default', { month: 'long', year: 'numeric' });
 }
 
 async function updateGoogleSheet(data, action) {
   const sheets = await getSheets();
   const spreadsheetId = process.env.SPREADSHEET_ID;
   const sheetName = getCurrentMonthTab();
-  const profit = (data.soldPrice || 0) - (data.cogs || 0);
-  const margin = data.cogs > 0 ? (profit / data.cogs).toFixed(4) : '';
-  const today = new Date().toLocaleDateString('en-MY');
-  const row = [today, data.item, data.cogs||'', data.soldPrice||'',
-               profit||'', margin, data.km||'', data.tolls||''];
-  await sheets.spreadsheets.values.append({
+
+  // Get spreadsheet metadata to find sheetId
+  const spreadsheet = await sheets.spreadsheets.get({ spreadsheetId });
+  const sheet = spreadsheet.data.sheets.find(s => s.properties.title === sheetName);
+  if (!sheet) throw new Error(`Sheet tab "${sheetName}" not found`);
+  const sheetId = sheet.properties.sheetId;
+
+  // Get all values to find the TOTAL row
+  const response = await sheets.spreadsheets.values.get({
     spreadsheetId,
-    range: `${sheetName}!A:H`,
-    valueInputOption: 'USER_ENTERED',
-    resource: { values: [row] }
+    range: `${sheetName}!A:A`
   });
+  const rows = response.data.values || [];
+  let totalRowIndex = rows.findIndex(r => r[0] && r[0].toString().toUpperCase().includes('TOTAL'));
+  if (totalRowIndex === -1) totalRowIndex = rows.length; // fallback: append
+
+  // Insert a blank row above TOTAL
+  await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    resource: {
+      requests: [{
+        insertDimension: {
+          range: {
+            sheetId,
+            dimension: 'ROWS',
+            startIndex: totalRowIndex,
+            endIndex: totalRowIndex + 1
+          },
+          inheritFromBefore: true
+        }
+      }]
+    }
+  });
+
+  // Calculate values
+  const today = new Date().toLocaleDateString('en-MY');
+  const newRow = totalRowIndex + 1; // 1-based for A1 notation
+  const profitFormula = `=D${newRow}-C${newRow}`;
+  const marginFormula = `=IF(C${newRow}>0,E${newRow}/C${newRow},"")`;
+
+  // Write data into the inserted row
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${sheetName}!A${newRow}:H${newRow}`,
+    valueInputOption: 'USER_ENTERED',
+    resource: {
+      values: [[
+        today,
+        data.item,
+        data.cogs || '',
+        data.soldPrice || '',
+        profitFormula,
+        marginFormula,
+        data.km || '',
+        data.tolls || ''
+      ]]
+    }
+  });
+
   console.log('Sheet updated:', data.item);
 }
 
