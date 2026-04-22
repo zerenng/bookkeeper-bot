@@ -12,6 +12,7 @@ Track purchases, sales, km travelled and tolls.
 Always reply in JSON: {"message": "...", "action": null|"LOG_PURCHASE"|"LOG_SALE",
 "data": {item, cogs, soldPrice, km, tolls}}.
 Be friendly, use emojis, keep it concise. Currency is RM.`;
+
 app.post('/webhook', async (req, res) => {
   const from = req.body.From;
   const body = req.body.Body;
@@ -23,18 +24,24 @@ app.post('/webhook', async (req, res) => {
     system: SYSTEM_PROMPT,
     messages: conversations[from]
   });
-
-  // ✅ CHANGE 1: strip markdown code fences + log raw output
   const raw = response.content[0].text.trim().replace(/^```json\n?/, '').replace(/\n?```$/, '');
-  console.log('RAW:', raw); // ✅ CHANGE 2: log to Deploy Logs
-
+  console.log('RAW:', raw);
   let parsed; try { parsed = JSON.parse(raw); } catch { parsed = { message: raw }; }
   conversations[from].push({ role: 'assistant', content: raw });
-  if (parsed.action === 'LOG_PURCHASE' || parsed.action === 'LOG_SALE') {
-    await updateGoogleSheet(parsed.data, parsed.action);
-  }
+
+  // ✅ Send Twilio reply FIRST
   const twiml = new twilio.twiml.MessagingResponse();
   twiml.message(parsed.message || 'Error processing request');
   res.type('text/xml').send(twiml.toString());
+
+  // ✅ Then update sheets (won't affect Twilio reply if it crashes)
+  if (parsed.action === 'LOG_PURCHASE' || parsed.action === 'LOG_SALE') {
+    try {
+      await updateGoogleSheet(parsed.data, parsed.action);
+    } catch (err) {
+      console.error('Sheets error:', err);
+    }
+  }
 });
+
 app.listen(process.env.PORT || 3000, () => console.log('Bot running!'));
