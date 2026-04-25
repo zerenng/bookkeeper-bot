@@ -35,7 +35,7 @@ async function ensureMonthSheet(sheets, spreadsheetId, sheetName) {
   });
   const newSheetId = addSheet.data.replies[0].addSheet.properties.sheetId;
 
-  // Write headers and month label
+  // Write headers and TOTAL row
   await sheets.spreadsheets.values.update({
     spreadsheetId,
     range: `${sheetName}!A1:H2`,
@@ -102,7 +102,11 @@ async function updateGoogleSheet(data, action) {
     }
   });
 
-  const newRow = totalRowIndex + 1; // 1-based
+  const newRow = totalRowIndex + 1; // 1-based row number for new data
+  const totalRow = newRow + 1;      // TOTAL row is now one below
+  const firstDataRow = 2;           // data always starts at row 2
+  const lastDataRow = totalRow - 1; // row just above TOTAL
+
   const today = new Date().toLocaleDateString('en-MY');
   const profitFormula = `=D${newRow}-C${newRow}`;
   const marginFormula = `=IFERROR(IF(D${newRow}="","",E${newRow}/C${newRow}),"")`;
@@ -122,6 +126,20 @@ async function updateGoogleSheet(data, action) {
         marginFormula,
         data.km || '',
         data.tolls || ''
+      ]]
+    }
+  });
+
+  // ✅ Update TOTAL row formulas to include new row
+  await sheets.spreadsheets.values.update({
+    spreadsheetId,
+    range: `${sheetName}!C${totalRow}:E${totalRow}`,
+    valueInputOption: 'USER_ENTERED',
+    resource: {
+      values: [[
+        `=SUM(C${firstDataRow}:C${lastDataRow})`,
+        `=SUM(D${firstDataRow}:D${lastDataRow})`,
+        `=(D${totalRow}-C${totalRow})`
       ]]
     }
   });
